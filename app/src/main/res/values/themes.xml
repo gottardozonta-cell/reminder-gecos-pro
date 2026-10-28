@@ -1,0 +1,20 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.GecosPro" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorScheme">@style/ColorScheme.GecosPro</item>
+    </style>
+
+    <style name="ColorScheme.GecosPro">
+        <item name="primary">@color/primary</item>
+        <item name="primaryContainer">@color/primary_container</item>
+        <item name="secondary">@color/secondary</item>
+        <item name="tertiary">@color/tertiary</item>
+        <item name="surface">@color/surface</item>
+        <item name="background">@color/background</item>
+        <item name="error">@color/error</item>
+        <item name="onPrimary">@color/on_primary</item>
+        <item name="onSecondary">@color/on_secondary</item>
+        <item name="onSurface">@color/on_surface</item>
+        <item name="onBackground">@color/on_background</item>
+        <item name="onError">@color/on_error</item>
+    </style>
+</resources>
