@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -28,12 +27,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.navigation.NavHostController // <-- Importazione corretta aggiunta
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -45,7 +42,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Store.init(this)
-        setContent { MaterialTheme { AppContent() } }
+        setContent {
+            MaterialTheme(
+                colorScheme = lightColorScheme(
+                    primary = MaterialTheme.colorScheme.primary,
+                    primaryContainer = MaterialTheme.colorScheme.primaryContainer,
+                    surface = MaterialTheme.colorScheme.surface
+                )
+            ) {
+                AppContent()
+            }
+        }
     }
 }
 
@@ -68,11 +75,20 @@ fun BottomNavBar(navController: NavHostController) {
         Triple("assegnazioni", "Assegnazioni", Icons.Default.Assignment),
         Triple("impostazioni", "Impostazioni", Icons.Default.Settings)
     )
-    NavigationBar {
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+        val currentRoute = navController.currentBackStackEntry?.destination?.route
         items.forEach { (route, label, icon) ->
             NavigationBarItem(
-                selected = navController.currentBackStackEntry?.destination?.route == route,
-                onClick = { navController.navigate(route) },
+                selected = currentRoute == route,
+                onClick = {
+                    if (currentRoute != route) {
+                        navController.navigate(route) {
+                            popUpTo("turni") { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                },
                 icon = { Icon(icon, contentDescription = label) },
                 label = { Text(label) }
             )
@@ -83,7 +99,6 @@ fun BottomNavBar(navController: NavHostController) {
 @Composable
 fun TurniScreen(navController: NavHostController) {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     var showAdd by remember { mutableStateOf(false) }
     var versione by remember { mutableStateOf(0) }
 
@@ -92,76 +107,77 @@ fun TurniScreen(navController: NavHostController) {
         versione++
     }
 
-    Column(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.weight(1f).padding(16.dp)) {
+    Scaffold(
+        bottomBar = { BottomNavBar(navController) },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showAdd = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Aggiungi turno")
+            }
+        }
+    ) { innerPadding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(16.dp)
+        ) {
+            Text("I Miei Turni", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(bottom = 16.dp))
+            
             val turni = remember(versione) { Store.turni(ctx) }
             val sedi = remember(versione) { Store.sedi(ctx) }
             val assegnazioni = remember(versione) { Store.assegnazioni(ctx) }
 
             if (turni.isEmpty()) {
-                item {
-                    Text(
-                        "Nessun turno configurato. Aggiungine uno!",
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(vertical = 32.dp)
-                    )
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Nessun turno configurato. Premi + per iniziare.", style = MaterialTheme.typography.bodyLarge)
                 }
             } else {
-                items(turni.sortedWith(compareBy({ it.giorno }, { it.ora }, { it.minuto }))) { t ->
-                    val sede = sedi.find { it.id == t.sedeId }
-                    val assegnazione = assegnazioni.find { it.id == t.assegnazioneId }
-                    Card(
-                        onClick = { /* TODO: Edit turno */ },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text(
-                                "${nomeGiorno(t.giorno)} ${hhmm(t.ora, t.minuto)}",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                "${if (t.tipo == Tipo.INGRESSO) "INGRESSO" else "USCITA"} • ${sede?.nome ?: "Sede non trovata"}",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            if (assegnazione != null) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(turni.sortedWith(compareBy({ it.giorno }, { it.ora }, { it.minuto }))) { t ->
+                        val sede = sedi.find { it.id == t.sedeId }
+                        val assegnazione = assegnazioni.find { it.id == t.assegnazioneId }
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "${nomeGiorno(t.giorno)} ${hhmm(t.ora, t.minuto)}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Switch(
+                                        checked = t.attivo,
+                                        onCheckedChange = {
+                                            t.attivo = it
+                                            Store.salvaTurni(ctx, turni)
+                                            riapplica()
+                                        }
+                                    )
+                                }
                                 Text(
-                                    assegnazione.nome,
-                                    style = MaterialTheme.typography.bodySmall
+                                    "${if (t.tipo == Tipo.INGRESSO) "INGRESSO" else "USCITA"} • ${sede?.nome ?: "Sede non configurata"}",
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
-                            }
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                Switch(
-                                    checked = t.attivo,
-                                    onCheckedChange = {
-                                        t.attivo = it
+                                if (assegnazione != null) {
+                                    Text(
+                                        assegnazione.nome,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    IconButton(onClick = {
+                                        turni.remove(t)
                                         Store.salvaTurni(ctx, turni)
                                         riapplica()
+                                    }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Elimina", tint = MaterialTheme.colorScheme.error)
                                     }
-                                )
-                                IconButton(onClick = {
-                                    turni.remove(t)
-                                    Store.salvaTurni(ctx, turni)
-                                    riapplica()
-                                }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Elimina")
                                 }
                             }
                         }
                     }
                 }
             }
-        }
-        BottomNavBar(navController)
-        FloatingActionButton(
-            onClick = { showAdd = true },
-            modifier = Modifier
-                .padding(16.dp)
-                .align(Alignment.BottomEnd)
-        ) {
-            Icon(Icons.Default.Add, contentDescription = "Aggiungi turno")
         }
     }
 
@@ -186,74 +202,75 @@ fun SediScreen(navController: NavHostController) {
     var showAdd by remember { mutableStateOf(false) }
     var versione by remember { mutableStateOf(0) }
 
-    Column(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.weight(1f).padding(16.dp)) {
+    Scaffold(
+        bottomBar = { BottomNavBar(navController) },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showAdd = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Aggiungi sede")
+            }
+        }
+    ) { innerPadding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(16.dp)
+        ) {
+            Text("Sedi", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(bottom = 16.dp))
+            
             val sedi = remember(versione) { Store.sedi(ctx) }
             if (sedi.isEmpty()) {
-                item {
-                    Text(
-                        "Nessuna sede configurata. Aggiungine una!",
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(vertical = 32.dp)
-                    )
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Nessuna sede salvata. Aggiungine una!", style = MaterialTheme.typography.bodyLarge)
                 }
             } else {
-                items(sedi) { s ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text(s.nome, style = MaterialTheme.typography.titleMedium)
-                            Text(s.indirizzo, style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                if (s.lat == 0.0) "⚠ GPS non impostato"
-                                else "📍 ${"%.2f".format(s.lat)}, ${"%.2f".format(s.lng)} (Raggio: ${s.raggio}m)",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        scope.launch {
-                                            val loc = Geo.posizione(ctx)
-                                            if (loc != null) {
-                                                s.lat = loc.latitude
-                                                s.lng = loc.longitude
-                                                Store.salvaSedi(ctx, sedi)
-                                                versione++
-                                            }
-                                        }
-                                    },
-                                    enabled = ContextCompat.checkSelfPermission(
-                                        ctx,
-                                        Manifest.permission.ACCESS_FINE_LOCATION
-                                    ) == PackageManager.PERMISSION_GRANTED
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(sedi) { s ->
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text(s.nome, style = MaterialTheme.typography.titleMedium)
+                                Text(s.indirizzo, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    if (s.lat == 0.0) "⚠ Posizione GPS mancante (impostala sul posto)"
+                                    else "📍 Coordinate memorizzate (Tolleranza: ${s.raggio}m)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (s.lat == 0.0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Imposta GPS qui")
-                                }
-                                IconButton(onClick = {
-                                    sedi.remove(s)
-                                    Store.salvaSedi(ctx, sedi)
-                                    versione++
-                                }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Elimina")
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                val loc = Geo.posizione(ctx)
+                                                if (loc != null) {
+                                                    s.lat = loc.latitude
+                                                    s.lng = loc.longitude
+                                                    Store.salvaSedi(ctx, sedi)
+                                                    versione++
+                                                }
+                                            }
+                                        },
+                                        enabled = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                    ) {
+                                        Text("Sono qui ora")
+                                    }
+                                    IconButton(onClick = {
+                                        sedi.remove(s)
+                                        Store.salvaSedi(ctx, sedi)
+                                        versione++
+                                    }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Elimina", tint = MaterialTheme.colorScheme.error)
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        }
-        BottomNavBar(navController)
-        FloatingActionButton(
-            onClick = { showAdd = true },
-            modifier = Modifier
-                .padding(16.dp)
-                .align(Alignment.BottomEnd)
-        ) {
-            Icon(Icons.Default.Add, contentDescription = "Aggiungi sede")
         }
     }
 
@@ -275,24 +292,13 @@ fun SediScreen(navController: NavHostController) {
                         }
                     },
                     enabled = nome.isNotBlank()
-                ) { Text("Aggiungi") }
+                ) { Text("Salva") }
             },
             dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Annulla") } },
             text = {
-                Column {
-                    OutlinedTextField(
-                        value = nome,
-                        onValueChange = { nome = it },
-                        label = { Text("Nome sede") },
-                        singleLine = true
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = indirizzo,
-                        onValueChange = { indirizzo = it },
-                        label = { Text("Indirizzo") },
-                        singleLine = true
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = nome, onValueChange = { nome = it }, label = { Text("Nome della sede (es. Capacitazione)") })
+                    OutlinedTextField(value = indirizzo, onValueChange = { indirizzo = it }, label = { Text("Indirizzo stradale") })
                 }
             }
         )
@@ -305,48 +311,45 @@ fun AssegnazioniScreen(navController: NavHostController) {
     var showAdd by remember { mutableStateOf(false) }
     var versione by remember { mutableStateOf(0) }
 
-    Column(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.weight(1f).padding(16.dp)) {
+    Scaffold(
+        bottomBar = { BottomNavBar(navController) },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showAdd = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Aggiungi assegnazione")
+            }
+        }
+    ) { innerPadding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(16.dp)
+        ) {
+            Text("Assegnazioni Gecos", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(bottom = 16.dp))
+            
             val assegnazioni = remember(versione) { Store.assegnazioni(ctx) }
             if (assegnazioni.isEmpty()) {
-                item {
-                    Text(
-                        "Nessuna assegnazione configurata. Aggiungine una!",
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(vertical = 32.dp)
-                    )
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Nessun servizio creato. Premi + per scriverne uno.", style = MaterialTheme.typography.bodyLarge)
                 }
             } else {
-                items(assegnazioni) { a ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(a.nome, style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.weight(1f))
-                            IconButton(onClick = {
-                                assegnazioni.remove(a)
-                                Store.salvaAssegnazioni(ctx, assegnazioni)
-                                versione++
-                            }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Elimina")
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(assegnazioni) { a ->
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(a.nome, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                                IconButton(onClick = {
+                                    assegnazioni.remove(a)
+                                    Store.salvaAssegnazioni(ctx, assegnazioni)
+                                    versione++
+                                }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Elimina", tint = MaterialTheme.colorScheme.error)
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-        BottomNavBar(navController)
-        FloatingActionButton(
-            onClick = { showAdd = true },
-            modifier = Modifier
-                .padding(16.dp)
-                .align(Alignment.BottomEnd)
-        ) {
-            Icon(Icons.Default.Add, contentDescription = "Aggiungi assegnazione")
         }
     }
 
@@ -367,15 +370,15 @@ fun AssegnazioniScreen(navController: NavHostController) {
                         }
                     },
                     enabled = nome.isNotBlank()
-                ) { Text("Aggiungi") }
+                ) { Text("Salva") }
             },
             dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Annulla") } },
             text = {
                 OutlinedTextField(
                     value = nome,
                     onValueChange = { nome = it },
-                    label = { Text("Nome assegnazione (copia esatto da Gecos)") },
-                    singleLine = true
+                    label = { Text("Scrivi l'assegnazione esatta di Gecos") },
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         )
@@ -385,7 +388,6 @@ fun AssegnazioniScreen(navController: NavHostController) {
 @Composable
 fun ImpostazioniScreen(navController: NavHostController) {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     var versione by remember { mutableStateOf(0) }
     var notifOk by remember { mutableStateOf(false) }
     var locOk by remember { mutableStateOf(false) }
@@ -430,61 +432,79 @@ fun ImpostazioniScreen(navController: NavHostController) {
     val imp = remember(versione) { Store.impostazioni(ctx) }
     val prossimo = remember(versione) { Scheduler.prossimo(ctx) }
 
-    Column(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.weight(1f).padding(16.dp)) {
-            item {
-                Card {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Promemoria attivi", style = MaterialTheme.typography.titleMedium)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Abilita notifiche", Modifier.weight(1f))
-                            Switch(
-                                checked = imp.master,
-                                onCheckedChange = {
-                                    imp.master = it
-                                    Store.salvaImpostazioni(ctx, imp)
-                                    riapplica()
-                                }
-                            )
-                        }
+    Scaffold(
+        bottomBar = { BottomNavBar(navController) }
+    ) { innerPadding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text("Impostazioni", style = MaterialTheme.typography.headlineMedium)
+
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Stato Generale", style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Abilita tutti i promemoria", Modifier.weight(1f))
+                        Switch(checked = imp.master, onCheckedChange = {
+                            imp.master = it
+                            Store.salvaImpostazioni(ctx, imp)
+                            riapplica()
+                        })
                     }
                 }
             }
-            item {
-                Card {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Prossimo turno", style = MaterialTheme.typography.titleMedium)
-                        val p = prossimo
-                        if (p == null) Text("Nessun turno programmato")
-                        else {
-                            val (t, cal, _) = p
-                            Text("${nomeGiorno(cal.get(Calendar.DAY_OF_WEEK))} ${hhmm(t.ora, t.minuto)}")
-                        }
-                        OutlinedButton(onClick = {
+
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Verifica e Collaudo", style = MaterialTheme.typography.titleMedium)
+                    val p = prossimo
+                    if (p == null) {
+                        Text("Nessun turno inserito o attivo.", style = MaterialTheme.typography.bodyMedium)
+                    } else {
+                        val (t, cal, _) = p
+                        Text("Prossimo evento: ${nomeGiorno(cal.get(Calendar.DAY_OF_WEEK))} ore ${hhmm(t.ora, t.minuto)}")
+                    }
+                    Button(
+                        onClick = {
                             val t0 = Store.turni(ctx).firstOrNull()
+                            val sede = t0?.let { Store.sedi(ctx).find { s -> s.id == it.sedeId } }
+                            val ass = t0?.let { Store.assegnazioni(ctx).find { a -> a.id == it.assegnazioneId } }
                             if (t0 != null) {
-                                val sede = Store.sedi(ctx).find { it.id == t0.sedeId }
-                                val assegnazione = Store.assegnazioni(ctx).find { it.id == t0.assegnazioneId }
-                                Notifiche.mostra(ctx, t0, sede, assegnazione, dataKey(Calendar.getInstance()), false)
+                                Notifiche.mostra(ctx, t0, sede, ass, dataKey(Calendar.getInstance()), false)
+                            } else {
+                                // Prova generica se vuoto
+                                val provvT = Turno(sedeId = "", assegnazioneId = "", tipo = Tipo.INGRESSO, ora = 12, minuto = 0, giorno = 2)
+                                val provvS = Sede(nome = "Sede Test", indirizzo = "Via Roma 1")
+                                val provvA = Assegnazione(nome = "Servizio Esempio Gecos")
+                                Notifiche.mostra(ctx, provvT, provvS, provvA, dataKey(Calendar.getInstance()), false)
                             }
-                        }) { Text("Prova notifica") }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Invia notifica di prova")
                     }
                 }
             }
-            item {
-                Card {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Permessi", style = MaterialTheme.typography.titleMedium)
-                        PermRow("Notifiche", notifOk) {
-                            permLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-                        }
-                        PermRow("Posizione (app attiva)", locOk) {
-                            permLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
-                        }
-                        PermRow("Posizione in background", bgOk, enabled = locOk) {
-                            bgLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                        }
-                        PermRow("Sveglie esatte", alarmOk) {
+
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Autorizzazioni Dispositivo", style = MaterialTheme.typography.titleMedium)
+                    PermRow("Notifiche di allarme", notifOk) {
+                        permLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                    }
+                    PermRow("GPS locale", locOk) {
+                        permLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
+                    }
+                    PermRow("GPS in Background (Sempre)", bgOk, enabled = locOk) {
+                        bgLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                    }
+                    PermRow("Timer di precisione", alarmOk) {
+                        if (Build.VERSION.SDK_INT >= 31) {
                             try {
                                 ctx.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${ctx.packageName}")))
                             } catch (_: Exception) {}
@@ -492,89 +512,111 @@ fun ImpostazioniScreen(navController: NavHostController) {
                     }
                 }
             }
-            item {
-                Card {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Suono notifica", style = MaterialTheme.typography.titleMedium)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = {
-                                val i = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
-                                    .putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
-                                    .putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Suono promemoria")
-                                    .putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, imp.suonoUri?.let { Uri.parse(it) })
-                                soundLauncher.launch(i)
-                            }) { Text("Scegli suono") }
-                            if (imp.suonoUri != null) {
-                                OutlinedButton(onClick = {
-                                    try { RingtoneManager.getRingtone(ctx, Uri.parse(imp.suonoUri))?.play() } catch (_: Exception) {}
-                                }) { Text("Prova") }
-                                OutlinedButton(onClick = {
-                                    val i2 = Store.impostazioni(ctx)
-                                    i2.suonoUri = null
-                                    Store.salvaImpostazioni(ctx, i2)
-                                    versione++
-                                }) { Text("Default") }
+
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Opzioni Audio e App", style = MaterialTheme.typography.titleMedium)
+                    
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Suoneria notifica")
+                            Text(if (imp.suonoUri == null) "Predefinita di sistema" else "Personalizzata impostata", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Button(onClick = {
+                            val i = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+                                .putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
+                                .putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Scegli tono")
+                                .putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, imp.suonoUri?.let { Uri.parse(it) })
+                            soundLauncher.launch(i)
+                        }) {
+                            Text("Cambia")
+                        }
+                    }
+                    
+                    Divider()
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("App da aprire")
+                            val lbl = imp.appPackage?.let { pkg ->
+                                try {
+                                    @Suppress("DEPRECATION")
+                                    ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)).toString()
+                                } catch (_: Exception) { pkg }
+                            } ?: "Non associata (apre se stessa)"
+                            Text(lbl, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Button(onClick = { showApps = true }) {
+                            Text("Scegli")
+                        }
+                    }
+                }
+            }
+
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Gestione Solleciti", style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = {
+                            if (imp.ripetiOgniMin > 1) {
+                                imp.ripetiOgniMin--
+                                Store.salvaImpostazioni(ctx, imp)
+                                versione++
                             }
-                        }
+                        }) { Text("−", style = MaterialTheme.typography.headlineMedium) }
+                        Text("Riprova ogni ${imp.ripetiOgniMin} minuti", Modifier.weight(1f))
+                        IconButton(onClick = {
+                            if (imp.ripetiOgniMin < 60) {
+                                imp.ripetiOgniMin++
+                                Store.salvaImpostazioni(ctx, imp)
+                                versione++
+                            }
+                        }) { Text("+", style = MaterialTheme.typography.headlineMedium) }
                     }
-                }
-            }
-            item {
-                Card {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("App da aprire", style = MaterialTheme.typography.titleMedium)
-                        val lbl = imp.appPackage?.let { pkg ->
-                            try {
-                                @Suppress("DEPRECATION")
-                                ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)).toString()
-                            } catch (_: Exception) { pkg }
-                        } ?: "Non impostata"
-                        Text(lbl, style = MaterialTheme.typography.bodySmall)
-                        OutlinedButton(onClick = { showApps = true }) { Text("Scegli app") }
-                    }
-                }
-            }
-            item {
-                Card {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Ripetizione notifica", style = MaterialTheme.typography.titleMedium)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = { imp.ripetiOgniMin = (imp.ripetiOgniMin - 1).coerceAtLeast(1); Store.salvaImpostazioni(ctx, imp); versione++ },
-                                enabled = imp.ripetiOgniMin > 1
-                            ) { Text("−") }
-                            Text("Ogni ${imp.ripetiOgniMin} min", Modifier.weight(1f))
-                            OutlinedButton(onClick = { imp.ripetiOgniMin = (imp.ripetiOgniMin + 1).coerceAtMost(60); Store.salvaImpostazioni(ctx, imp); versione++ }) { Text("+") }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = { imp.ripetiMaxMin = (imp.ripetiMaxMin - 5).coerceAtLeast(5); Store.salvaImpostazioni(ctx, imp); versione++ },
-                                enabled = imp.ripetiMaxMin > 5
-                            ) { Text("−") }
-                            Text("Max ${imp.ripetiMaxMin} min", Modifier.weight(1f))
-                            OutlinedButton(onClick = { imp.ripetiMaxMin = (imp.ripetiMaxMin + 5).coerceAtMost(240); Store.salvaImpostazioni(ctx, imp); versione++ }) { Text("+") }
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = {
+                            if (imp.ripetiMaxMin > 5) {
+                                imp.ripetiMaxMin -= 5
+                                Store.salvaImpostazioni(ctx, imp)
+                                versione++
+                            }
+                        }) { Text("−", style = MaterialTheme.typography.headlineMedium) }
+                        Text("Per un massimo di ${imp.ripetiMaxMin} minuti", Modifier.weight(1f))
+                        IconButton(onClick = {
+                            if (imp.ripetiMaxMin < 240) {
+                                imp.ripetiMaxMin += 5
+                                Store.salvaImpostazioni(ctx, imp)
+                                versione++
+                            }
+                        }) { Text("+", style = MaterialTheme.typography.headlineMedium) }
                     }
                 }
             }
         }
-        BottomNavBar(navController)
 
         if (showApps) {
+            val apps = remember { elencoApp(ctx) }
             AlertDialog(
                 onDismissRequest = { showApps = false },
                 title = { Text("Scegli Gecos Plus") },
-                confirmButton = { TextButton(onClick = { showApps = false }) { Text("Chiudi") } },
+                confirmButton = { TextButton(onClick = { showApps = false }) { Text("Annulla") } },
                 text = {
-                    LazyColumn(Modifier.verticalScroll(rememberScrollState())) {
-                        items(elencoApp(ctx)) { (pkg, label) ->
-                            TextButton(onClick = {
-                                val i3 = Store.impostazioni(ctx)
-                                i3.appPackage = pkg
-                                Store.salvaImpostazioni(ctx, i3)
-                                showApps = false
-                                versione++
-                            }) { Text(label) }
+                    Box(Modifier.height(300.dp)) {
+                        LazyColumn {
+                            items(apps) { (pkg, label) ->
+                                TextButton(
+                                    onClick = {
+                                        val i3 = Store.impostazioni(ctx)
+                                        i3.appPackage = pkg
+                                        Store.salvaImpostazioni(ctx, i3)
+                                        showApps = false
+                                        versione++
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(label, align = Alignment.CenterHorizontally)
+                                }
+                            }
                         }
                     }
                 }
@@ -591,28 +633,23 @@ fun AggiungiTurnoDialog(
     val ctx = LocalContext.current
     val sedi = Store.sedi(ctx)
     val assegnazioni = Store.assegnazioni(ctx)
+    
     var selectedSede by remember { mutableStateOf(sedi.firstOrNull()?.id ?: "") }
     var selectedAssegnazione by remember { mutableStateOf(assegnazioni.firstOrNull()?.id ?: "") }
     var selectedGiorno by remember { mutableStateOf(Calendar.MONDAY) }
     var selectedTipo by remember { mutableStateOf(Tipo.INGRESSO) }
     var ora by remember { mutableStateOf(8) }
-    var minuto by remember { mutableStateOf(0) }
+    var minuto by remember { mutableStateOf(45) }
     var showTimePicker by remember { mutableStateOf(false) }
 
     if (showTimePicker) {
-        TimePickerDialog(
-            ctx,
-            { _, h, m -> ora = h; minuto = m },
-            ora,
-            minuto,
-            true
-        ).show()
+        TimePickerDialog(ctx, { _, h, m -> ora = h; minuto = m }, ora, minuto, true).show()
         showTimePicker = false
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Nuovo Turno") },
+        title = { Text("Aggiungi Turno") },
         confirmButton = {
             TextButton(
                 onClick = {
@@ -630,24 +667,34 @@ fun AggiungiTurnoDialog(
                     }
                 },
                 enabled = selectedSede.isNotBlank() && selectedAssegnazione.isNotBlank()
-            ) { Text("Aggiungi") }
+            ) { Text("Crea") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                DropdownMenuItem(
-                    label = "Sede",
-                    selected = sedi.find { it.id == selectedSede }?.nome ?: "Seleziona",
-                    items = sedi.map { it.nome to it.id },
-                    onSelected = { selectedSede = it }
-                )
-                DropdownMenuItem(
-                    label = "Assegnazione",
-                    selected = assegnazioni.find { it.id == selectedAssegnazione }?.nome ?: "Seleziona",
-                    items = assegnazioni.map { it.nome to it.id },
-                    onSelected = { selectedAssegnazione = it }
-                )
-                DropdownMenuItem(
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (sedi.isEmpty()) {
+                    Text("⚠ Crea prima una sede!", color = MaterialTheme.colorScheme.error)
+                } else {
+                    DropdownSelector(
+                        label = "Sede",
+                        selected = sedi.find { it.id == selectedSede }?.nome ?: "Scegli Sede",
+                        items = sedi.map { it.nome to it.id },
+                        onSelected = { selectedSede = it as String }
+                    )
+                }
+
+                if (assegnazioni.isEmpty()) {
+                    Text("⚠ Crea prima un'assegnazione!", color = MaterialTheme.colorScheme.error)
+                } else {
+                    DropdownSelector(
+                        label = "Assegnazione",
+                        selected = assegnazioni.find { it.id == selectedAssegnazione }?.nome ?: "Scegli Servizio",
+                        items = assegnazioni.map { it.nome to it.id },
+                        onSelected = { selectedAssegnazione = it as String }
+                    )
+                }
+
+                DropdownSelector(
                     label = "Giorno",
                     selected = nomeGiorno(selectedGiorno),
                     items = listOf(
@@ -659,19 +706,18 @@ fun AggiungiTurnoDialog(
                         "Sabato" to Calendar.SATURDAY,
                         "Domenica" to Calendar.SUNDAY
                     ),
-                    onSelected = { selectedGiorno = it }
+                    onSelected = { selectedGiorno = it as Int }
                 )
-                DropdownMenuItem(
-                    label = "Tipo",
+
+                DropdownSelector(
+                    label = "Tipo Evento",
                     selected = if (selectedTipo == Tipo.INGRESSO) "Ingresso" else "Uscita",
                     items = listOf("Ingresso" to Tipo.INGRESSO, "Uscita" to Tipo.USCITA),
-                    onSelected = { selectedTipo = it }
+                    onSelected = { selectedTipo = it as Tipo }
                 )
-                OutlinedButton(
-                    onClick = { showTimePicker = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Ora: ${hhmm(ora, minuto)}")
+
+                Button(onClick = { showTimePicker = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Orario: ${hhmm(ora, minuto)}")
                 }
             }
         }
@@ -679,7 +725,7 @@ fun AggiungiTurnoDialog(
 }
 
 @Composable
-fun DropdownMenuItem(
+fun DropdownSelector(
     label: String,
     selected: String,
     items: List<Pair<String, *>>,
@@ -691,7 +737,7 @@ fun DropdownMenuItem(
             onClick = { expanded = true },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(selected.ifEmpty { "Seleziona $label" })
+            Text("$label: $selected")
         }
         DropdownMenu(
             expanded = expanded,
@@ -701,43 +747,11 @@ fun DropdownMenuItem(
                 DropdownMenuItem(
                     text = { Text(text) },
                     onClick = {
-                        onSelected(value)
+                        onSelected(value!!)
                         expanded = false
                     }
                 )
             }
         }
     }
-}
-
-@Composable
-fun PermRow(nome: String, ok: Boolean, enabled: Boolean = true, onAsk: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Icon(
-            if (ok) Icons.Default.Check else Icons.Default.Warning,
-            contentDescription = if (ok) "OK" else "Non concesso"
-        )
-        Text(nome, Modifier.weight(1f).padding(start = 8.dp))
-        if (!ok) {
-            TextButton(enabled = enabled, onClick = onAsk) {
-                Text("Concedi")
-            }
-        }
-    }
-}
-
-fun elencoApp(c: Context): List<Pair<String, String>> {
-    val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-    return c.packageManager.queryIntentActivities(i, 0)
-        .mapNotNull {
-            val pkg = it.activityInfo?.packageName ?: return@mapNotNull null
-            val label = try { it.loadLabel(c.packageManager).toString() } catch (_: Exception) { pkg }
-            pkg to label
-        }
-        .distinctBy { it.first }
-        .filter { it.first != c.packageName }
-        .sortedBy { it.second.lowercase() }
 }
