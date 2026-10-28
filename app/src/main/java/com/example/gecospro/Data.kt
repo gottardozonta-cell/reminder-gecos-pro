@@ -62,16 +62,25 @@ object Store {
         }
     }
 
-    private inline fun <reified T> leggi(key: String): List<T> =
-        p.getString(key, null)?.let { gson.fromJson(it, object : TypeToken<List<T>>() {}.type) } ?: emptyList()
+    private inline fun <reified T> leggi(key: String): List<T> {
+        val json = p.getString(key, null) ?: return emptyList()
+        return try {
+            gson.fromJson<List<T>>(json, object : TypeToken<List<T>>() {}.type) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
 
     private inline fun <reified T> salva(key: String, list: List<T>) =
         p.edit().putString(key, gson.toJson(list)).apply()
 
-    fun sedi(c: Context): MutableList<Sede> { init(c); return leggi("sedi").toMutableList() }
-    fun assegnazioni(c: Context): MutableList<Assegnazione> { init(c); return leggi("assegnazioni").toMutableList() }
-    fun turni(c: Context): MutableList<Turno> { init(c); return leggi("turni").toMutableList() }
-    fun impostazioni(c: Context): Impostazioni { init(c); return p.getString("imp", null)?.let { gson.fromJson(it, Impostazioni::class.java) } ?: Impostazioni() }
+    fun sedi(c: Context): MutableList<Sede> { init(c); return leggi<Sede>("sedi").toMutableList() }
+    fun assegnazioni(c: Context): MutableList<Assegnazione> { init(c); return leggi<Assegnazione>("assegnazioni").toMutableList() }
+    fun turni(c: Context): MutableList<Turno> { init(c); return leggi<Turno>("turni").toMutableList() }
+    fun impostazioni(c: Context): Impostazioni {
+        init(c)
+        return p.getString("imp", null)?.let { gson.fromJson(it, Impostazioni::class.java) } ?: Impostazioni()
+    }
 
     fun salvaSedi(c: Context, list: List<Sede>) { init(c); salva("sedi", list) }
     fun salvaAssegnazioni(c: Context, list: List<Assegnazione>) { init(c); salva("assegnazioni", list) }
