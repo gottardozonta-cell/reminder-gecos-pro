@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Tema nativo leggero: Jetpack Compose gestirà autonomamente tutta la grafica interna -->
     <style name="Theme.GecosPro" parent="@android:style/Theme.DeviceDefault.NoActionBar">
         <item name="android:statusBarColor">@color/primary</item>
         <item name="android:windowLightStatusBar">true</item>
