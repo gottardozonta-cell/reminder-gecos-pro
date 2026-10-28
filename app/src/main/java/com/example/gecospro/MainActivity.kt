@@ -42,8 +42,6 @@ import java.util.Calendar
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
-
-class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Store.init(this)
